@@ -1,0 +1,5 @@
+package: app
+repository: ftp://example.com/repo
+repository_mode: real
+ascii_tree: true
+max_depth: 3

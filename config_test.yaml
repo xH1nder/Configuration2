@@ -1,0 +1,6 @@
+# Конфиг для проверки режима test.
+package: A
+repository: test_repo.txt
+repository_mode: test
+ascii_tree: false
+max_depth: 2

@@ -1,0 +1,6 @@
+# Основной конфиг для демонстрации этапа 1.
+package: org.apache.commons:commons-lang3
+repository: https://repo1.maven.org/maven2
+repository_mode: real
+ascii_tree: true
+max_depth: 3

@@ -1,0 +1,5 @@
+package: app
+repository: no_such_repo.txt
+repository_mode: test
+ascii_tree: true
+max_depth: 3
