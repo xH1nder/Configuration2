@@ -1,5 +1,5 @@
-# Основной конфиг для демонстрации этапа 1.
-package: org.apache.commons:commons-lang3
+# Основной конфиг для этапа 2.
+package: junit:junit:4.13.2
 repository: https://repo1.maven.org/maven2
 repository_mode: real
 ascii_tree: true

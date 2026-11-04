@@ -1,9 +1,9 @@
 @echo off
 echo Good config, real mode
-python src\main.py --config config.yaml
+python src\main.py --config config.yaml --show-config
 echo.
 echo Good config, test mode
-python src\main.py --config config_test.yaml
+python src\main.py --config config_test.yaml --show-config
 echo.
 echo Help
 python src\main.py --help

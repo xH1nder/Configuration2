@@ -1,4 +1,4 @@
-package: app
+package: junit:junit:4.13.2
 repository: https://repo1.maven.org/maven2
 repository_mode: real
 ascii_tree: maybe

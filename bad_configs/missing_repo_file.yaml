@@ -1,4 +1,4 @@
-package: app
+package: A
 repository: no_such_repo.txt
 repository_mode: test
 ascii_tree: true
