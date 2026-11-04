@@ -1,6 +1,6 @@
-# Конфиг для проверки режима test.
+# Ветвление и общая зависимость D.
 package: A
 repository: test_repo.txt
 repository_mode: test
 ascii_tree: false
-max_depth: 2
+max_depth: 3

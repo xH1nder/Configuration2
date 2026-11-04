@@ -1,0 +1,5 @@
+package: A
+repository: bad_configs/bad_test_repo.txt
+repository_mode: test
+ascii_tree: false
+max_depth: 3

@@ -1,0 +1,6 @@
+# Самозависимость W -> W.
+package: W
+repository: test_repo.txt
+repository_mode: test
+ascii_tree: false
+max_depth: 5

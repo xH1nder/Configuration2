@@ -1,9 +1,9 @@
 @echo off
 echo Stage 2: direct dependencies of junit:junit:4.13.2
-python src\main.py --config config.yaml
+python src\main.py --config config.yaml --direct
 echo.
 echo Stage 2: direct dependencies from test graph
-python src\main.py --config config_test.yaml
+python src\main.py --config config_test.yaml --direct
 echo.
 echo Stage 1: config parameters
 python src\main.py --config config.yaml --show-config

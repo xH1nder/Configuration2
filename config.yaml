@@ -1,4 +1,4 @@
-# Основной конфиг для этапа 2.
+# Основной конфиг для этапа 3.
 package: junit:junit:4.13.2
 repository: https://repo1.maven.org/maven2
 repository_mode: real

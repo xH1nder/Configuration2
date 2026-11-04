@@ -1,4 +1,4 @@
-"""Инструмент визуализации графа зависимостей. Этап 2."""
+"""Инструмент визуализации графа зависимостей. Этап 3."""
 
 import os
 import re
@@ -18,6 +18,12 @@ timeout = 30
 max_subst = 5
 http_not_found = 404
 step = 1
+root_depth = 0
+unseen_depth = max_depth_limit + step
+frame_node = 0
+frame_depth = 1
+frame_deps = 2
+frame_index = 3
 param_keys = [
     "package",
     "repository",
@@ -28,7 +34,11 @@ param_keys = [
 modes = ["real", "test"]
 url_schemes = ["http", "https"]
 package_pattern = r"^[A-Za-z0-9._:-]+$"
-usage = "usage: run.bat [--config PATH] [--show-config]"
+test_name_pattern = r"^[A-Z]+$"
+edge_sep = " -> "
+cycle_prefix = "cycle: "
+no_deps_text = "no dependencies"
+usage = "usage: run.bat [--config PATH] [--show-config] [--direct]"
 
 
 def load_config(path):
@@ -326,22 +336,55 @@ def download_text(url):
         return None, "cannot download POM: bad encoding"
 
 
-def read_test_graph(params):
-    """Прочитать прямые зависимости из тестового файла."""
-    path = params["repository"]
+def check_test_name(name):
+    """Проверить имя пакета тестового графа."""
+    if re.match(test_name_pattern, name) is None:
+        return "test repository names must be uppercase Latin letters"
+    return None
+
+
+def load_test_repo(path):
+    """Прочитать тестовый граф в словарь смежности."""
     try:
         with open(path, "r", encoding="utf-8") as fh:
             lines = fh.readlines()
     except (OSError, UnicodeError):
         return None, "cannot read test repository: " + path
-    target = params["package"]
+    graph = {}
     for line in lines:
         parts = line.split()
         if parts == [] or parts[0].startswith("#"):
             continue
-        if parts[0] == target:
-            return parts[1:], None
-    return None, "package not found in test repository: " + target
+        for name in parts:
+            bad = check_test_name(name)
+            if bad is not None:
+                return None, bad
+        graph[parts[0]] = parts[1:]
+    return graph, None
+
+
+def read_test_graph(params):
+    """Прочитать прямые зависимости из тестового файла."""
+    graph, bad = load_test_repo(params["repository"])
+    if bad is not None:
+        return None, bad
+    target = params["package"]
+    if target not in graph:
+        return None, "package not found in test repository: " + target
+    return graph[target], None
+
+
+def fetch_node_deps(node, repo):
+    """Получить прямые зависимости одного Maven-пакета."""
+    parts = node.split(":")
+    if len(parts) != gav_parts:
+        return [], None
+    group, artifact, version = parts
+    url = build_pom_url(repo, group, artifact, version)
+    text, bad = download_text(url)
+    if bad is not None:
+        return None, bad
+    return parse_pom(text)
 
 
 def fetch_real_deps(params):
@@ -349,12 +392,7 @@ def fetch_real_deps(params):
     parts = params["package"].split(":")
     if len(parts) != gav_parts:
         return None, "package must be group:artifact:version"
-    group, artifact, version = parts
-    url = build_pom_url(params["repository"], group, artifact, version)
-    text, bad = download_text(url)
-    if bad is not None:
-        return None, bad
-    return parse_pom(text)
+    return fetch_node_deps(params["package"], params["repository"])
 
 
 def get_direct_deps(params):
@@ -362,6 +400,113 @@ def get_direct_deps(params):
     if params["repository_mode"] == "test":
         return read_test_graph(params)
     return fetch_real_deps(params)
+
+
+def get_node_deps(params, test_graph, node):
+    """Получить зависимости узла по режиму работы."""
+    if params["repository_mode"] == "test":
+        return test_graph.get(node, []), None
+    return fetch_node_deps(node, params["repository"])
+
+
+def make_cycle(stack, dep):
+    """Собрать путь цикла по стеку DFS."""
+    nodes = [frame[frame_node] for frame in stack]
+    start = nodes.index(dep)
+    return nodes[start:] + [dep]
+
+
+def note_cycle(cycles, seen, stack, dep):
+    """Записать цикл, если он еще не встречался."""
+    cycle = make_cycle(stack, dep)
+    key = tuple(cycle)
+    if key in seen:
+        return
+    seen.add(key)
+    cycles.append(cycle)
+
+
+def read_frame_deps(params, test_graph, frame):
+    """Прочитать зависимости узла для кадра стека."""
+    if frame[frame_deps] is not None:
+        return None
+    deps, bad = get_node_deps(params, test_graph, frame[frame_node])
+    if bad is not None:
+        return bad
+    frame[frame_deps] = deps
+    return None
+
+
+def take_depth(best, node, depth):
+    """Запомнить глубину узла, если она меньше прежней."""
+    if depth >= best.get(node, unseen_depth):
+        return False
+    best[node] = depth
+    return True
+
+
+def walk_graph(start, max_depth, params, test_graph):
+    """Обойти граф зависимостей в глубину без рекурсии."""
+    graph = {start: []}
+    best = {start: root_depth}
+    on_path = {start}
+    cycles = []
+    seen = set()
+    stack = [[start, root_depth, None, 0]]
+    while stack != []:
+        frame = stack[-1]
+        node = frame[frame_node]
+        bad = read_frame_deps(params, test_graph, frame)
+        if bad is not None:
+            return None, None, bad
+        deps = frame[frame_deps]
+        if frame[frame_index] >= len(deps):
+            on_path.discard(node)
+            stack.pop()
+            continue
+        dep = deps[frame[frame_index]]
+        frame[frame_index] += step
+        if dep not in graph[node]:
+            graph[node].append(dep)
+        if dep in on_path:
+            note_cycle(cycles, seen, stack, dep)
+            continue
+        next_depth = frame[frame_depth] + step
+        if not take_depth(best, dep, next_depth):
+            continue
+        if dep not in graph:
+            graph[dep] = []
+        if next_depth >= max_depth:
+            continue
+        on_path.add(dep)
+        stack.append([dep, next_depth, None, 0])
+    return graph, cycles, None
+
+
+def build_graph(params):
+    """Построить граф зависимостей по режиму работы."""
+    start = params["package"]
+    test_graph = None
+    if params["repository_mode"] == "test":
+        test_graph, bad = load_test_repo(params["repository"])
+        if bad is not None:
+            return None, None, bad
+        if start not in test_graph:
+            return None, None, "package not found in test repository: " + start
+    return walk_graph(start, params["max_depth"], params, test_graph)
+
+
+def show_graph(graph, cycles):
+    """Напечатать граф зависимостей и найденные циклы."""
+    edges = 0
+    for node in graph:
+        for dep in graph[node]:
+            print(node + edge_sep + dep)
+            edges += step
+    if not edges:
+        print(no_deps_text)
+    for cycle in cycles:
+        print(cycle_prefix + edge_sep.join(cycle))
 
 
 def show_deps(deps):
@@ -384,7 +529,7 @@ def show_params(params):
 
 def parse_args(argv):
     """Разобрать параметры командной строки."""
-    opts = {"config": default_config, "show": False}
+    opts = {"config": default_config, "show": False, "direct": False}
     index = 0
     while index < len(argv):
         arg = argv[index]
@@ -397,9 +542,45 @@ def parse_args(argv):
         elif arg == "--show-config":
             opts["show"] = True
             index = index + step
+        elif arg == "--direct":
+            opts["direct"] = True
+            index = index + step
         else:
             return None, "unknown argument: " + arg
     return opts, None
+
+
+def run_direct(params):
+    """Напечатать прямые зависимости пакета."""
+    deps, bad = get_direct_deps(params)
+    if bad is not None:
+        return bad
+    show_deps(deps)
+    return None
+
+
+def run_graph(params):
+    """Построить и напечатать граф зависимостей."""
+    graph, cycles, bad = build_graph(params)
+    if bad is not None:
+        return bad
+    show_graph(graph, cycles)
+    return None
+
+
+def run_action(opts, params):
+    """Выполнить действие, выбранное пользователем."""
+    if opts["show"]:
+        show_params(params)
+        return 0
+    if opts["direct"]:
+        bad = run_direct(params)
+    else:
+        bad = run_graph(params)
+    if bad is not None:
+        print("error: " + bad, file=sys.stderr)
+        return 1
+    return 0
 
 
 def main(argv=None):
@@ -422,15 +603,7 @@ def main(argv=None):
     if bad is not None:
         print("error: " + bad, file=sys.stderr)
         return 1
-    if opts["show"]:
-        show_params(params)
-        return 0
-    deps, bad = get_direct_deps(params)
-    if bad is not None:
-        print("error: " + bad, file=sys.stderr)
-        return 1
-    show_deps(deps)
-    return 0
+    return run_action(opts, params)
 
 
 if __name__ == "__main__":

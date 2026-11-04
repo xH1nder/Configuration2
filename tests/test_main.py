@@ -416,6 +416,7 @@ class TestParseArgs(unittest.TestCase):
         opts, bad = parse_args([])
         self.assertEqual(opts["config"], "config.yaml")
         self.assertFalse(opts["show"])
+        self.assertFalse(opts["direct"])
         self.assertIsNone(bad)
 
     def test_long(self):
@@ -434,6 +435,12 @@ class TestParseArgs(unittest.TestCase):
         """Флаг --show-config включается."""
         opts, bad = parse_args(["--show-config"])
         self.assertTrue(opts["show"])
+        self.assertIsNone(bad)
+
+    def test_direct(self):
+        """Флаг --direct включается."""
+        opts, bad = parse_args(["--direct"])
+        self.assertTrue(opts["direct"])
         self.assertIsNone(bad)
 
     def test_no_value(self):
@@ -469,8 +476,8 @@ class TestMain(unittest.TestCase):
         self.assertIn("ascii_tree=false", out)
 
     def test_test_mode(self):
-        """В режиме test печатаются соседи из файла."""
-        graph = write_file("A B C\nB D\n", ".txt")
+        """В режиме test печатается весь граф зависимостей."""
+        graph = write_file("A B C\nB D\nC D\n", ".txt")
         path = write_file(
             "package: A\n"
             "repository: " + graph + "\n"
@@ -483,7 +490,43 @@ class TestMain(unittest.TestCase):
         remove_file(graph)
         self.assertEqual(code, 0)
         self.assertEqual(err, "")
+        expected = "A -> B\nA -> C\nB -> D\nC -> D\n"
+        self.assertEqual(out, expected)
+
+    def test_direct_mode(self):
+        """Флаг --direct печатает только соседей."""
+        graph = write_file("A B C\nB D\nC D\n", ".txt")
+        path = write_file(
+            "package: A\n"
+            "repository: " + graph + "\n"
+            "repository_mode: test\n"
+            "ascii_tree: false\n"
+            "max_depth: 2\n",
+            ".yaml")
+        code, out, err = run_main(["--config", path, "--direct"])
+        remove_file(path)
+        remove_file(graph)
+        self.assertEqual(code, 0)
+        self.assertEqual(err, "")
         self.assertEqual(out, "B\nC\n")
+
+    def test_cycle(self):
+        """Цикл не приводит к зацикливанию."""
+        graph = write_file("X Y\nY X\n", ".txt")
+        path = write_file(
+            "package: X\n"
+            "repository: " + graph + "\n"
+            "repository_mode: test\n"
+            "ascii_tree: false\n"
+            "max_depth: 3\n",
+            ".yaml")
+        code, out, err = run_main(["--config", path])
+        remove_file(path)
+        remove_file(graph)
+        self.assertEqual(code, 0)
+        self.assertEqual(err, "")
+        expected = "X -> Y\nY -> X\ncycle: X -> Y -> X\n"
+        self.assertEqual(out, expected)
 
     def test_no_deps(self):
         """Пакет без зависимостей так и пишется."""

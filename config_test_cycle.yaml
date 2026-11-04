@@ -1,0 +1,6 @@
+# Циклический граф X -> Y -> Z -> X.
+package: X
+repository: test_repo.txt
+repository_mode: test
+ascii_tree: false
+max_depth: 10
