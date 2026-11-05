@@ -5,7 +5,7 @@ import re
 import sys
 import urllib.error
 import urllib.request
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as element_tree
 from urllib.parse import urlparse
 
 import yaml
@@ -320,8 +320,8 @@ def read_dependencies(root, props, managed):
 def parse_pom(text):
     """Разобрать POM и вернуть прямые зависимости."""
     try:
-        root = ET.fromstring(text)
-    except (ET.ParseError, ValueError):
+        root = element_tree.fromstring(text)
+    except (element_tree.ParseError, ValueError):
         return None, "bad POM: bad XML"
     props = read_properties(root)
     fill_project_props(root, props)
