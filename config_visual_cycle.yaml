@@ -1,0 +1,6 @@
+# Этап 5: цикл и ASCII-дерево.
+package: X
+repository: test_repo.txt
+repository_mode: test
+ascii_tree: true
+max_depth: 10

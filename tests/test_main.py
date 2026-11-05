@@ -418,6 +418,7 @@ class TestParseArgs(unittest.TestCase):
         self.assertFalse(opts["show"])
         self.assertFalse(opts["direct"])
         self.assertFalse(opts["order"])
+        self.assertFalse(opts["mermaid"])
         self.assertIsNone(bad)
 
     def test_long(self):

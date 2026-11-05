@@ -1,0 +1,6 @@
+# Этап 5: ветвление и ASCII-дерево.
+package: A
+repository: test_repo.txt
+repository_mode: test
+ascii_tree: true
+max_depth: 3

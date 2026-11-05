@@ -1,4 +1,4 @@
-"""Инструмент визуализации графа зависимостей. Этап 4."""
+"""Инструмент визуализации графа зависимостей. Этап 5."""
 
 import os
 import re
@@ -40,7 +40,24 @@ cycle_prefix = "cycle: "
 order_sep = ". "
 order_start = 1
 no_deps_text = "no dependencies"
-usage = "usage: run.bat [--config PATH] [--show-config] [--direct] [--order]"
+mermaid_header = "graph TD"
+mermaid_indent = "    "
+mermaid_prefix = "n"
+mermaid_arrow = " --> "
+tree_kind = 0
+tree_name = 1
+tree_prefix = 2
+tree_last_flag = 3
+tree_enter = 0
+tree_exit = 1
+tree_branch = "+-- "
+tree_end = "`-- "
+tree_pipe = "|   "
+tree_space = "    "
+tree_cycle = " (cycle)"
+tree_repeat = " (already shown)"
+usage = ("usage: run.bat [--config PATH] [--show-config] "
+         "[--direct] [--order] [--mermaid]")
 
 
 def load_config(path):
@@ -523,6 +540,90 @@ def show_order(order):
         print(str(index) + order_sep + node)
 
 
+def mermaid_ids(graph):
+    """Присвоить узлам графа короткие идентификаторы Mermaid."""
+    ids = {}
+    for node in graph:
+        ids[node] = mermaid_prefix + str(len(ids))
+    for node in graph:
+        for dep in graph[node]:
+            if dep not in ids:
+                ids[dep] = mermaid_prefix + str(len(ids))
+    return ids
+
+
+def mermaid_lines(graph):
+    """Собрать строки описания графа на языке Mermaid."""
+    ids = mermaid_ids(graph)
+    lines = [mermaid_header]
+    for node in ids:
+        text = ids[node] + '["' + node + '"]'
+        lines.append(mermaid_indent + text)
+    for node in graph:
+        for dep in graph[node]:
+            text = ids[node] + mermaid_arrow + ids[dep]
+            lines.append(mermaid_indent + text)
+    return lines
+
+
+def show_mermaid(graph):
+    """Напечатать описание графа на языке Mermaid."""
+    for line in mermaid_lines(graph):
+        print(line)
+
+
+def push_tree_children(stack, node, prefix, graph):
+    """Положить в стек детей узла в обратном порядке."""
+    deps = graph.get(node, [])
+    last = len(deps) - step
+    for index in reversed(range(len(deps))):
+        frame = [tree_enter, deps[index], prefix, index == last]
+        stack.append(frame)
+
+
+def tree_lines(start, graph):
+    """Построить строки ASCII-дерева зависимостей."""
+    lines = [start]
+    expanded = {start}
+    on_path = {start}
+    stack = []
+    push_tree_children(stack, start, "", graph)
+    while stack != []:
+        frame = stack.pop()
+        node = frame[tree_name]
+        if frame[tree_kind] == tree_exit:
+            on_path.discard(node)
+            continue
+        prefix = frame[tree_prefix]
+        is_last = frame[tree_last_flag]
+        if is_last:
+            line = prefix + tree_end + node
+        else:
+            line = prefix + tree_branch + node
+        if node in on_path:
+            lines.append(line + tree_cycle)
+            continue
+        if node in expanded:
+            lines.append(line + tree_repeat)
+            continue
+        lines.append(line)
+        expanded.add(node)
+        on_path.add(node)
+        stack.append([tree_exit, node, "", False])
+        if is_last:
+            prefix += tree_space
+        else:
+            prefix += tree_pipe
+        push_tree_children(stack, node, prefix, graph)
+    return lines
+
+
+def show_tree(start, graph):
+    """Напечатать ASCII-дерево зависимостей."""
+    for line in tree_lines(start, graph):
+        print(line)
+
+
 def show_graph(graph, cycles):
     """Напечатать граф зависимостей и найденные циклы."""
     edges = 0
@@ -556,15 +657,24 @@ def show_params(params):
 
 def check_opts(opts):
     """Проверить совместимость флагов командной строки."""
-    if opts["direct"] and opts["order"]:
-        return "options --direct and --order cannot be used together"
+    pairs = [
+        ("direct", "order"),
+        ("mermaid", "direct"),
+        ("mermaid", "order"),
+    ]
+    for first, second in pairs:
+        if opts[first] and opts[second]:
+            text = "options --" + first + " and --" + second
+            return text + " cannot be used together"
     return None
 
 
 def parse_args(argv):
     """Разобрать параметры командной строки."""
+    flags = {"--show-config": "show", "--direct": "direct",
+             "--order": "order", "--mermaid": "mermaid"}
     opts = {"config": default_config, "show": False,
-            "direct": False, "order": False}
+            "direct": False, "order": False, "mermaid": False}
     index = 0
     while index < len(argv):
         arg = argv[index]
@@ -574,14 +684,8 @@ def parse_args(argv):
                 return None, "option needs a value: " + arg
             opts["config"] = argv[next_index]
             index = next_index + step
-        elif arg == "--show-config":
-            opts["show"] = True
-            index = index + step
-        elif arg == "--direct":
-            opts["direct"] = True
-            index = index + step
-        elif arg == "--order":
-            opts["order"] = True
+        elif arg in flags:
+            opts[flags[arg]] = True
             index = index + step
         else:
             return None, "unknown argument: " + arg
@@ -618,6 +722,19 @@ def run_order(params):
     return None
 
 
+def run_mermaid(params):
+    """Напечатать Mermaid-диаграмму и ASCII-дерево, если включено."""
+    graph, _cycles, bad = build_graph(params)
+    if bad is not None:
+        return bad
+    show_mermaid(graph)
+    if not params["ascii_tree"]:
+        return None
+    print()
+    show_tree(params["package"], graph)
+    return None
+
+
 def run_action(opts, params):
     """Выполнить действие, выбранное пользователем."""
     if opts["show"]:
@@ -627,6 +744,8 @@ def run_action(opts, params):
         bad = run_direct(params)
     elif opts["order"]:
         bad = run_order(params)
+    elif opts["mermaid"]:
+        bad = run_mermaid(params)
     else:
         bad = run_graph(params)
     if bad is not None:
