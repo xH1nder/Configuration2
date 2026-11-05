@@ -417,6 +417,7 @@ class TestParseArgs(unittest.TestCase):
         self.assertEqual(opts["config"], "config.yaml")
         self.assertFalse(opts["show"])
         self.assertFalse(opts["direct"])
+        self.assertFalse(opts["order"])
         self.assertIsNone(bad)
 
     def test_long(self):
@@ -442,6 +443,18 @@ class TestParseArgs(unittest.TestCase):
         opts, bad = parse_args(["--direct"])
         self.assertTrue(opts["direct"])
         self.assertIsNone(bad)
+
+    def test_order(self):
+        """Флаг --order включается."""
+        opts, bad = parse_args(["--order"])
+        self.assertTrue(opts["order"])
+        self.assertIsNone(bad)
+
+    def test_direct_order_conflict(self):
+        """--direct и --order нельзя использовать вместе."""
+        opts, bad = parse_args(["--direct", "--order"])
+        self.assertIsNone(opts)
+        self.assertIn("cannot be used together", bad)
 
     def test_no_value(self):
         """--config без значения ошибка."""

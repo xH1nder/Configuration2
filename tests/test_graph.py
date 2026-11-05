@@ -1,4 +1,4 @@
-"""Тесты третьего этапа: граф зависимостей."""
+"""Тесты третьего и четвертого этапов."""
 
 import contextlib
 import io
@@ -10,7 +10,8 @@ import unittest
 
 from src.main import build_graph, check_test_name
 from src.main import fetch_node_deps, load_test_repo
-from src.main import show_graph, walk_graph
+from src.main import main, run_order, show_graph, show_order
+from src.main import walk_graph, walk_order
 
 
 def write_file(text, suffix):
@@ -28,6 +29,15 @@ def remove_file(path):
         os.remove(path)
     except OSError:
         pass
+
+
+def run_main(argv):
+    """Запустить main и вернуть код, stdout и stderr."""
+    out = io.StringIO()
+    err = io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = main(argv)
+    return code, out.getvalue(), err.getvalue()
 
 
 def make_pom(deps):
@@ -300,6 +310,186 @@ class TestShowGraph(unittest.TestCase):
         with contextlib.redirect_stdout(out):
             show_graph(graph, [["X", "Y", "X"]])
         expected = "X -> Y\nY -> X\ncycle: X -> Y -> X\n"
+        self.assertEqual(out.getvalue(), expected)
+
+
+class TestWalkOrder(unittest.TestCase):
+    """Проверка порядка загрузки зависимостей."""
+
+    def test_branch(self):
+        """Ветвление обходится в глубину в порядке POM."""
+        graph = {
+            "A": ["B", "C"],
+            "B": ["D"],
+            "C": ["D"],
+            "D": [],
+        }
+        order = walk_order("A", graph)
+        self.assertEqual(order, ["A", "B", "D", "C"])
+
+    def test_chain(self):
+        """Цепочка выводится от корня к последней зависимости."""
+        graph = {
+            "P": ["Q"],
+            "Q": ["R"],
+            "R": ["S"],
+            "S": ["T"],
+            "T": [],
+        }
+        order = walk_order("P", graph)
+        self.assertEqual(order, ["P", "Q", "R", "S", "T"])
+
+    def test_shared(self):
+        """Общая зависимость печатается один раз."""
+        graph = {
+            "A": ["B", "C"],
+            "B": ["D"],
+            "C": ["D"],
+            "D": ["E"],
+            "E": [],
+        }
+        order = walk_order("A", graph)
+        self.assertEqual(order, ["A", "B", "D", "E", "C"])
+
+    def test_cycle(self):
+        """Цикл не приводит к повторению узлов."""
+        graph = {"X": ["Y"], "Y": ["Z"], "Z": ["X"]}
+        order = walk_order("X", graph)
+        self.assertEqual(order, ["X", "Y", "Z"])
+
+    def test_self_cycle(self):
+        """Самозависимость не повторяется."""
+        order = walk_order("W", {"W": ["W"]})
+        self.assertEqual(order, ["W"])
+
+    def test_no_deps(self):
+        """Пакет без зависимостей остается в списке один."""
+        order = walk_order("A", {"A": []})
+        self.assertEqual(order, ["A"])
+
+    def test_missing_node(self):
+        """Неизвестный узел считается листом."""
+        order = walk_order("A", {})
+        self.assertEqual(order, ["A"])
+
+
+class TestShowOrder(unittest.TestCase):
+    """Проверка вывода порядка загрузки."""
+
+    def test_numbered(self):
+        """Порядок печатается нумерованным списком."""
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            show_order(["A", "B", "D", "C"])
+        expected = "1. A\n2. B\n3. D\n4. C\n"
+        self.assertEqual(out.getvalue(), expected)
+
+    def test_empty(self):
+        """Пустой порядок печатает no dependencies."""
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            show_order([])
+        self.assertEqual(out.getvalue(), "no dependencies\n")
+
+
+class TestOrderMain(unittest.TestCase):
+    """Проверка режима --order через main."""
+
+    def test_branch(self):
+        """Флаг --order печатает порядок загрузки."""
+        graph = write_file("A B C\nB D\nC D\n", ".txt")
+        path = write_file(
+            "package: A\n"
+            "repository: " + graph + "\n"
+            "repository_mode: test\n"
+            "ascii_tree: false\n"
+            "max_depth: 3\n",
+            ".yaml")
+        code, out, err = run_main(["--config", path, "--order"])
+        remove_file(path)
+        remove_file(graph)
+        self.assertEqual(code, 0)
+        self.assertEqual(err, "")
+        expected = "1. A\n2. B\n3. D\n4. C\n"
+        self.assertEqual(out, expected)
+
+    def test_cycle(self):
+        """Цикл не мешает вывести порядок."""
+        graph = write_file("X Y\nY Z\nZ X\n", ".txt")
+        path = write_file(
+            "package: X\n"
+            "repository: " + graph + "\n"
+            "repository_mode: test\n"
+            "ascii_tree: false\n"
+            "max_depth: 4\n",
+            ".yaml")
+        code, out, err = run_main(["--config", path, "--order"])
+        remove_file(path)
+        remove_file(graph)
+        self.assertEqual(code, 0)
+        self.assertEqual(err, "")
+        self.assertEqual(out, "1. X\n2. Y\n3. Z\n")
+
+    def test_missing_package(self):
+        """Ошибка построения графа возвращается и в режиме --order."""
+        graph = write_file("A B\n", ".txt")
+        path = write_file(
+            "package: M\n"
+            "repository: " + graph + "\n"
+            "repository_mode: test\n"
+            "ascii_tree: false\n"
+            "max_depth: 3\n",
+            ".yaml")
+        code, out, err = run_main(["--config", path, "--order"])
+        remove_file(path)
+        remove_file(graph)
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "")
+        self.assertIn("not found", err)
+
+    def test_depth_limit(self):
+        """Порядок учитывает max_depth этапа 3."""
+        graph = write_file("P Q\nQ R\nR S\nS T\n", ".txt")
+        path = write_file(
+            "package: P\n"
+            "repository: " + graph + "\n"
+            "repository_mode: test\n"
+            "ascii_tree: false\n"
+            "max_depth: 2\n",
+            ".yaml")
+        code, out, err = run_main(["--config", path, "--order"])
+        remove_file(path)
+        remove_file(graph)
+        self.assertEqual(code, 0)
+        self.assertEqual(err, "")
+        self.assertEqual(out, "1. P\n2. Q\n3. R\n")
+
+    def test_real_local_repo(self):
+        """Порядок строится и по локальному Maven-репозиторию."""
+        root = tempfile.mkdtemp()
+        make_repo(
+            root, "org.example", "a", "1.0",
+            [("org.example", "b", "1.0")])
+        make_repo(
+            root, "org.example", "b", "1.0",
+            [("org.example", "c", "1.0")])
+        make_repo(root, "org.example", "c", "1.0", [])
+        params = {
+            "package": "org.example:a:1.0",
+            "repository": pathlib.Path(root).as_uri(),
+            "repository_mode": "real",
+            "ascii_tree": False,
+            "max_depth": 5,
+        }
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            bad = run_order(params)
+        shutil.rmtree(root, ignore_errors=True)
+        self.assertIsNone(bad)
+        expected = (
+            "1. org.example:a:1.0\n"
+            "2. org.example:b:1.0\n"
+            "3. org.example:c:1.0\n")
         self.assertEqual(out.getvalue(), expected)
 
 

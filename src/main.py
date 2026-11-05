@@ -1,4 +1,4 @@
-"""Инструмент визуализации графа зависимостей. Этап 3."""
+"""Инструмент визуализации графа зависимостей. Этап 4."""
 
 import os
 import re
@@ -37,8 +37,10 @@ package_pattern = r"^[A-Za-z0-9._:-]+$"
 test_name_pattern = r"^[A-Z]+$"
 edge_sep = " -> "
 cycle_prefix = "cycle: "
+order_sep = ". "
+order_start = 1
 no_deps_text = "no dependencies"
-usage = "usage: run.bat [--config PATH] [--show-config] [--direct]"
+usage = "usage: run.bat [--config PATH] [--show-config] [--direct] [--order]"
 
 
 def load_config(path):
@@ -496,6 +498,31 @@ def build_graph(params):
     return walk_graph(start, params["max_depth"], params, test_graph)
 
 
+def walk_order(start, graph):
+    """Построить порядок загрузки пакета и зависимостей."""
+    order = [start]
+    seen = {start}
+    stack = list(reversed(graph.get(start, [])))
+    while stack != []:
+        node = stack.pop()
+        if node in seen:
+            continue
+        seen.add(node)
+        order.append(node)
+        for dep in reversed(graph.get(node, [])):
+            stack.append(dep)
+    return order
+
+
+def show_order(order):
+    """Напечатать порядок загрузки зависимостей."""
+    if order == []:
+        print(no_deps_text)
+        return
+    for index, node in enumerate(order, order_start):
+        print(str(index) + order_sep + node)
+
+
 def show_graph(graph, cycles):
     """Напечатать граф зависимостей и найденные циклы."""
     edges = 0
@@ -512,7 +539,7 @@ def show_graph(graph, cycles):
 def show_deps(deps):
     """Напечатать зависимости по одной в строке."""
     if deps == []:
-        print("no dependencies")
+        print(no_deps_text)
         return
     for dep in deps:
         print(dep)
@@ -527,9 +554,17 @@ def show_params(params):
         print(key + "=" + str(value))
 
 
+def check_opts(opts):
+    """Проверить совместимость флагов командной строки."""
+    if opts["direct"] and opts["order"]:
+        return "options --direct and --order cannot be used together"
+    return None
+
+
 def parse_args(argv):
     """Разобрать параметры командной строки."""
-    opts = {"config": default_config, "show": False, "direct": False}
+    opts = {"config": default_config, "show": False,
+            "direct": False, "order": False}
     index = 0
     while index < len(argv):
         arg = argv[index]
@@ -545,8 +580,14 @@ def parse_args(argv):
         elif arg == "--direct":
             opts["direct"] = True
             index = index + step
+        elif arg == "--order":
+            opts["order"] = True
+            index = index + step
         else:
             return None, "unknown argument: " + arg
+    bad = check_opts(opts)
+    if bad is not None:
+        return None, bad
     return opts, None
 
 
@@ -568,6 +609,15 @@ def run_graph(params):
     return None
 
 
+def run_order(params):
+    """Построить и напечатать порядок загрузки зависимостей."""
+    graph, cycles, bad = build_graph(params)
+    if bad is not None:
+        return bad
+    show_order(walk_order(params["package"], graph))
+    return None
+
+
 def run_action(opts, params):
     """Выполнить действие, выбранное пользователем."""
     if opts["show"]:
@@ -575,6 +625,8 @@ def run_action(opts, params):
         return 0
     if opts["direct"]:
         bad = run_direct(params)
+    elif opts["order"]:
+        bad = run_order(params)
     else:
         bad = run_graph(params)
     if bad is not None:
